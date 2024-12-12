@@ -1,6 +1,6 @@
 # reqtrace 🔍
 
-A powerful command-line tool for real-time network activity monitoring, connection tracing, and network access control of any process or command.
+A Simple command-line tool for real-time network activity monitoring, connection tracing, and network access control of any process or command.
 
 [![Crates.io](https://img.shields.io/crates/v/reqtrace)](https://crates.io/crates/reqtrace)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)

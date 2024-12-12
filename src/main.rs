@@ -1,8 +1,16 @@
+//! A Simple command-line tool for monitoring and controlling network connections of processes
+//! 
+//! This tool allows you to:
+//! - Monitor network connections made by a specified process
+//! - Block network connections and terminate the process
+//! - Track connection statistics and generate reports
+//! - Resolve IP addresses to domain names
+
 use std::process::Command;
 use std::error::Error;
 use std::thread;
 use std::time::Duration;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex}; 
 use std::time::Instant;
 #[cfg(target_os = "linux")]
 use std::fs;
@@ -14,6 +22,7 @@ use std::env;
 use std::collections::HashMap;
 use clap::Parser;
 
+/// Command line arguments parsed using clap
 #[derive(Parser)]
 #[command(author, version, about = "Monitor and control network connections of processes")]
 struct Cli {
@@ -21,7 +30,7 @@ struct Cli {
     #[arg(required = true)]
     command: String,
 
-    /// Command arguments
+    /// Command arguments passed to the monitored process
     #[arg(trailing_var_arg = true)]
     args: Vec<String>,
 
@@ -37,24 +46,36 @@ struct Cli {
     #[arg(short = 't', long = "timeout", default_value = "1000")]
     dns_timeout: u64,
 
-    /// Show verbose output
+    /// Show verbose output including debug information
     #[arg(short = 'v', long = "verbose")]
     verbose: bool,
+
+    /// Quiet mode - show only essential information
+    #[arg(short = 'q', long = "quiet")]
+    quiet: bool,
 }
 
+/// Execution modes that control how network connections are handled
 #[derive(PartialEq)]
 enum ExecutionMode {
+    /// Monitor connections without blocking
     Normal,
+    /// Exit process on first connection attempt
     ExitFirst,
+    /// Block connections but allow process to continue
     BlockAndContinue,
 }
 
+/// Cache for DNS lookups to avoid repeated queries
 struct DnsCache {
+    /// Map of IP addresses to hostnames and timestamps
     cache: HashMap<String, (Option<String>, Instant)>,
+    /// Time-to-live for cache entries
     ttl: Duration,
 }
 
 impl DnsCache {
+    /// Create a new DNS cache with specified TTL in seconds
     fn new(ttl_secs: u64) -> Self {
         Self {
             cache: HashMap::new(),
@@ -62,6 +83,7 @@ impl DnsCache {
         }
     }
 
+    /// Get a cached hostname for an IP address if available and not expired
     fn get(&mut self, ip: &str) -> Option<Option<String>> {
         if let Some((hostname, timestamp)) = self.cache.get(ip) {
             if timestamp.elapsed() < self.ttl {
@@ -71,24 +93,28 @@ impl DnsCache {
         None
     }
 
+    /// Cache a hostname for an IP address
     fn set(&mut self, ip: String, hostname: Option<String>) {
         self.cache.insert(ip, (hostname, Instant::now()));
     }
 }
 
+/// Get active network connections for a process on Linux
 #[cfg(target_os = "linux")]
 fn get_process_connections(pid: u32) -> Result<HashSet<String>, Box<dyn Error>> {
+    // Read IPv4 and IPv6 connection information from proc filesystem
     let tcp = fs::read_to_string(format!("/proc/{}/net/tcp", pid))?;
     let tcp6 = fs::read_to_string(format!("/proc/{}/net/tcp6", pid))?;
     
     let mut connections = HashSet::new();
     
+    // Parse connection information from proc entries
     for line in tcp.lines().chain(tcp6.lines()).skip(1) {
         let parts: Vec<&str> = line.split_whitespace().collect();
         if parts.len() >= 3 {
             let remote = parts[2];
             if remote != "00000000:0000" {  // Skip 0.0.0.0:0
-                // Parse the remote address
+                // Parse the remote address from hex format
                 let (addr, port) = remote.split_once(':').unwrap_or(("", ""));
                 if let (Ok(addr_num), Ok(port_num)) = (u32::from_str_radix(addr, 16), u16::from_str_radix(port, 16)) {
                     let ip = format!(
@@ -107,8 +133,10 @@ fn get_process_connections(pid: u32) -> Result<HashSet<String>, Box<dyn Error>> 
     Ok(connections)
 }
 
+/// Get active network connections for a process on macOS
 #[cfg(target_os = "macos")]
 fn get_process_connections(pid: u32) -> Result<HashSet<String>, Box<dyn Error>> {
+    // Use lsof command to get connection information
     let output = Command::new("lsof")
         .args(["-i", "-n", "-P", "-p", &pid.to_string()])
         .output()?;
@@ -117,6 +145,7 @@ fn get_process_connections(pid: u32) -> Result<HashSet<String>, Box<dyn Error>> 
     
     if output.status.success() {
         let output_str = String::from_utf8_lossy(&output.stdout);
+        // Parse lsof output looking for established connections
         for line in output_str.lines() {
             if line.contains("ESTABLISHED") || line.contains("SYN_SENT") {
                 if let Some(addr) = line.split_whitespace().find(|&s| s.contains("->")) {
@@ -131,11 +160,13 @@ fn get_process_connections(pid: u32) -> Result<HashSet<String>, Box<dyn Error>> 
     Ok(connections)
 }
 
+/// Stub implementation for unsupported platforms
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
 fn get_process_connections(_pid: u32) -> Result<HashSet<String>, Box<dyn Error>> {
     Ok(HashSet::new())
 }
 
+/// Resolve an IP address to a domain name with caching and timeout
 fn resolve_domain_name(addr: &str, dns_cache: &Arc<Mutex<DnsCache>>, timeout: u64) -> (String, Option<String>) {
     if let Ok(sock_addr) = addr.to_socket_addrs() {
         if let Some(addr) = sock_addr.into_iter().next() {
@@ -175,14 +206,20 @@ fn resolve_domain_name(addr: &str, dns_cache: &Arc<Mutex<DnsCache>>, timeout: u6
     (addr.to_string(), None)
 }
 
+/// Track statistics about network connections
 struct ConnectionStats {
+    /// Total number of connection attempts
     total_connections: usize,
+    /// Count of connections per domain
     domains: HashMap<String, usize>,
+    /// Count of connections per IP address
     ips: HashMap<String, usize>,
+    /// When monitoring started
     start_time: Instant,
 }
 
 impl ConnectionStats {
+    /// Create new empty connection statistics
     fn new() -> Self {
         Self {
             total_connections: 0,
@@ -192,6 +229,7 @@ impl ConnectionStats {
         }
     }
 
+    /// Record a new connection attempt
     fn add_connection(&mut self, addr: &str, domain: &Option<String>) {
         self.total_connections += 1;
         
@@ -205,7 +243,17 @@ impl ConnectionStats {
         }
     }
 
-    fn print_summary(&self) {
+    /// Print connection statistics summary
+    fn print_summary(&self, quiet: bool) {
+        if quiet {
+            if self.total_connections > 0 {
+                eprintln!("\n\nTotal connections: {} ({})", 
+                    self.total_connections.to_string().bright_yellow(),
+                    format!("{:.1}s", self.start_time.elapsed().as_secs_f64()).dimmed()
+                );
+            }
+            return;
+        }
         // Add a fancy header
         eprintln!("\n{}", "━".repeat(50).bright_blue());
         eprintln!("{}",   "           Network Activity Report           ".bold());
@@ -240,13 +288,18 @@ impl ConnectionStats {
     }
 }
 
+/// Display an animated activity indicator
 struct ActivityMonitor {
+    /// Unicode spinner characters
     spinner_states: Vec<&'static str>,
+    /// Current spinner position
     current_state: usize,
+    /// When spinner was last updated
     last_update: Instant,
 }
 
 impl ActivityMonitor {
+    /// Create new activity monitor
     fn new() -> Self {
         Self {
             spinner_states: vec!["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
@@ -255,6 +308,7 @@ impl ActivityMonitor {
         }
     }
 
+    /// Update and get current spinner character
     fn tick(&mut self) -> &str {
         if self.last_update.elapsed() > Duration::from_millis(80) {
             self.current_state = (self.current_state + 1) % self.spinner_states.len();
@@ -264,7 +318,11 @@ impl ActivityMonitor {
     }
 }
 
+/// Print initial program banner with configuration info
 fn print_startup_banner(command: &str, mode: &ExecutionMode, cli: &Cli) {
+    if cli.quiet {
+        return;
+    }
     eprintln!("\n{}", "━".repeat(50).bright_blue());
     eprintln!("🔍 {} v{}", env!("CARGO_PKG_NAME").bold(), env!("CARGO_PKG_VERSION"));
     eprintln!("   {}", env!("CARGO_PKG_DESCRIPTION"));
@@ -282,6 +340,7 @@ fn print_startup_banner(command: &str, mode: &ExecutionMode, cli: &Cli) {
     eprintln!("");
 }
 
+/// Main program entry point
 fn main() -> Result<(), Box<dyn Error>> {
     // Parse CLI arguments using Clap
     let cli = Cli::parse();
@@ -305,6 +364,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         .spawn()
         .map_err(|e| format!("Failed to execute command: {}", e))?;
 
+    if !cli.quiet { 
+        eprintln!("{} {} {}", 
+            format!("[{}]", chrono::Local::now().format("%H:%M:%S")).dimmed(),
+            "STARTED".bright_blue(),
+            cli.command.bright_yellow()
+        );
+    }
+
     let pid = child.id();
     let mut stats = ConnectionStats::new();
     let mut known_connections = HashSet::new();
@@ -318,67 +385,70 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut activity_monitor = ActivityMonitor::new();
 
-    // Monitoring loop
+    // Main monitoring loop - runs until child process exits
     while let None = child.try_wait()? {
         if let Ok(current_connections) = get_process_connections(pid) {
             for conn in current_connections.difference(&known_connections) {
                 let (addr, maybe_domain) = resolve_domain_name(conn, &dns_cache, cli.dns_timeout);
                 let timestamp = chrono::Local::now().format("%H:%M:%S").to_string();
                 
-                // Track statistics
                 stats.add_connection(&addr, &maybe_domain);
                 
-                // Add verbose logging if enabled
                 if cli.verbose {
                     eprintln!("Debug: New connection detected to {}", addr);
                 }
 
                 match mode {
                     ExecutionMode::Normal => {
-                        eprint!("\r{} {} {} ", 
-                            format!("[{}]", timestamp).dimmed(),
-                            activity_monitor.tick(),
-                            "CONNECTION".bright_green()
-                        );
+                        if !cli.quiet {
+                            eprint!("\r{} {} {} ", 
+                                format!("[{}]", timestamp).dimmed(),
+                                activity_monitor.tick(),
+                                "CONNECTION".bright_green()
+                            );
+                        }
                     },
                     ExecutionMode::ExitFirst => {
                         eprint!("{} ", format!("[{}]", timestamp).dimmed());
                         eprint!("{} ", "BLOCKED".bright_red());
                         child.kill()?;
-                        if let Some(domain) = &maybe_domain {
-                            eprintln!("{} {} {}", 
-                                addr.bright_yellow(),
-                                "→".bright_blue(),
-                                domain.bright_cyan()
-                            );
-                        } else {
-                            eprintln!("{}", addr.bright_yellow());
+                        if !cli.quiet {
+                            if let Some(domain) = &maybe_domain {
+                                eprintln!("{} {} {}", 
+                                    addr.bright_yellow(),
+                                    "→".bright_blue(),
+                                    domain.bright_cyan()
+                                );
+                            } else {
+                                eprintln!("{}", addr.bright_yellow());
+                            }
                         }
-                        eprintln!("{} {} Terminating process due to network activity", 
-                            format!("[{}]", timestamp).dimmed(),
-                            "STOPPED".bright_red(),
-                        );
-                        stats.print_summary();
+                        eprintln!("Process terminated due to network activity");
+                        stats.print_summary(cli.quiet);
                         return Ok(());
                     },
                     ExecutionMode::BlockAndContinue => {
                         blocked_count += 1;
-                        eprint!("\r{} {} {} ", 
-                            format!("[{}]", timestamp).dimmed(),
-                            activity_monitor.tick(),
-                            "BLOCKED".bright_red()
-                        );
+                        if !cli.quiet {
+                            eprint!("\r{} {} {} ", 
+                                format!("[{}]", timestamp).dimmed(),
+                                activity_monitor.tick(),
+                                "BLOCKED".bright_red()
+                            );
+                        }
                     }
                 }
                 
-                if let Some(domain) = maybe_domain {
-                    eprintln!("{} {} {}", 
-                        addr.bright_yellow(),
-                        "→".bright_blue(),
-                        domain.bright_cyan()
-                    );
-                } else {
-                    eprintln!("{}", addr.bright_yellow());
+                if !cli.quiet {
+                    if let Some(domain) = maybe_domain {
+                        eprintln!("{} {} {}", 
+                            addr.bright_yellow(),
+                            "→".bright_blue(),
+                            domain.bright_cyan()
+                        );
+                    } else {
+                        eprintln!("{}", addr.bright_yellow());
+                    }
                 }
             }
             known_connections = current_connections;
@@ -389,22 +459,23 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Get the exit status
     let status = child.wait()?;
 
-    eprintln!("{} {} {}", 
-        format!("[{}]", chrono::Local::now().format("%H:%M:%S")).dimmed(),
-        "FINISHED".bright_blue(),
-        cli.command.bright_yellow()
-    );
-
-    // Enhance the ConnectionStats to show blocked connections
-    if mode == ExecutionMode::BlockAndContinue {
-        eprintln!("\n{} {}", 
-            "Blocked Connections:".bright_red(),
-            blocked_count.to_string().bright_yellow()
+    // Update the final status messages
+    if !cli.quiet {
+        eprintln!("{} {} {}", 
+            format!("[{}]", chrono::Local::now().format("%H:%M:%S")).dimmed(),
+            "FINISHED".bright_blue(),
+            cli.command.bright_yellow()
         );
+
+        if mode == ExecutionMode::BlockAndContinue {
+            eprintln!("\n{} {}", 
+                "Blocked Connections:".bright_red(),
+                blocked_count.to_string().bright_yellow()
+            );
+        }
     }
 
-    // Print the summary before exiting
-    stats.print_summary();
+    stats.print_summary(cli.quiet);
 
     // Propagate the exit code
     if !status.success() {
