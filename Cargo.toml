@@ -8,5 +8,6 @@ license = "MIT"
 repository = "https://github.com/onemadgeek/reqtrace"
 
 [dependencies]
-url = "2.4"
-regex = "1.9" 
+url = "2.5.0"
+regex = "1.10.3"
+lazy_static = "1.4.0" 

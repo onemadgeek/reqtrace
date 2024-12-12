@@ -3,6 +3,7 @@ use std::io::{self, BufRead, BufReader};
 use regex::Regex;
 use url::Url;
 use std::error::Error;
+use lazy_static::lazy_static;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = std::env::args().collect();
@@ -45,7 +46,6 @@ fn process_output(reader: impl BufRead) -> io::Result<()> {
 }
 
 fn extract_urls(text: &str) -> Option<Vec<String>> {
-    // Compile regex only once
     lazy_static! {
         static ref URL_REGEX: Regex = Regex::new(
             r"https?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+"
