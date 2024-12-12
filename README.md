@@ -100,7 +100,6 @@ Options:
 ### Platform Support
 - ✅ Linux: Native `/proc` filesystem monitoring
 - ✅ macOS: Integration with `lsof`
-- ⏳ Windows: Coming soon
 
 ### Monitoring Capabilities
 - TCP connections (IPv4 and IPv6)
