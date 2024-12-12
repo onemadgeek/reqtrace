@@ -1,0 +1,12 @@
+[package]
+name = "reqtrace"
+version = "0.1.0"
+edition = "2021"
+authors = ["Your Name <your.email@example.com>"]
+description = "A simple command-line tool to trace API calls made by other commands"
+license = "MIT"
+repository = "https://github.com/your-username/reqtrace"
+
+[dependencies]
+url = "2.4"
+regex = "1.9" 
