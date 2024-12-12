@@ -1,13 +1,14 @@
 use std::process::Command;
-use std::io::{BufRead, BufReader};
+use std::io::{self, BufRead, BufReader};
 use regex::Regex;
 use url::Url;
+use std::error::Error;
 
-fn main() {
+fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
-        println!("Usage: reqtrace <command> [args...]");
-        return;
+        eprintln!("Usage: reqtrace <command> [args...]");
+        std::process::exit(1);
     }
 
     let command = &args[1];
@@ -17,38 +18,48 @@ fn main() {
         .args(command_args)
         .stdout(std::process::Stdio::piped())
         .spawn()
-        .expect("Failed to execute command");
+        .map_err(|e| format!("Failed to execute command: {}", e))?;
 
-    let stdout = child.stdout.take().unwrap();
+    let stdout = child.stdout.take()
+        .ok_or("Failed to capture stdout")?;
     let reader = BufReader::new(stdout);
 
+    process_output(reader)?;
+    
+    child.wait()
+        .map_err(|e| format!("Failed to wait on child process: {}", e))?;
+    
+    Ok(())
+}
+
+fn process_output(reader: impl BufRead) -> io::Result<()> {
     for line in reader.lines() {
-        let line = line.unwrap();
+        let line = line?;
         if let Some(urls) = extract_urls(&line) {
             for url in urls {
                 println!("API call detected: {}", url);
             }
         }
     }
-
-    child.wait().expect("Failed to wait on child");
+    Ok(())
 }
 
 fn extract_urls(text: &str) -> Option<Vec<String>> {
-    let url_regex = Regex::new(r"https?://[^\s<>\"']+").unwrap();
-    let matches: Vec<String> = url_regex.find_iter(text)
+    // Compile regex only once
+    lazy_static! {
+        static ref URL_REGEX: Regex = Regex::new(
+            r"https?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+"
+        ).unwrap();
+    }
+
+    let matches: Vec<String> = URL_REGEX.find_iter(text)
         .filter_map(|m| {
             let url_str = m.as_str();
-            match Url::parse(url_str) {
-                Ok(_) => Some(url_str.to_string()),
-                Err(_) => None
-            }
+            Url::parse(url_str)
+                .map(|_| url_str.to_string())
+                .ok()
         })
         .collect();
 
-    if matches.is_empty() {
-        None
-    } else {
-        Some(matches)
-    }
-} 
+    (!matches.is_empty()).then_some(matches)
+}
