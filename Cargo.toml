@@ -2,10 +2,10 @@
 name = "reqtrace"
 version = "0.1.0"
 edition = "2021"
-authors = ["Your Name <your.email@example.com>"]
+authors = ["Arun Prakash <arunprakash27ar@gmail.com>"]
 description = "A simple command-line tool to trace API calls made by other commands"
 license = "MIT"
-repository = "https://github.com/your-username/reqtrace"
+repository = "https://github.com/onemadgeek/reqtrace"
 
 [dependencies]
 url = "2.4"
