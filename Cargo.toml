@@ -1,6 +1,6 @@
 [package]
 name = "reqtrace"
-version = "0.2.0"
+version = "0.2.1"
 authors = ["Arun Prakash <arunprakash27ar@gmail.com>"]
 description = "A powerful command-line tool for real-time network activity monitoring, connection tracing, and network access control of any process or command."
 edition = "2021"
