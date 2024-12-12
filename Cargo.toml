@@ -1,11 +1,11 @@
 [package]
 name = "reqtrace"
 version = "0.2.0"
-authors = ["Your Name <your.email@example.com>"]
-description = "A network connection monitoring and control tool"
+authors = ["Arun Prakash <arunprakash27ar@gmail.com>"]
+description = "A powerful command-line tool for real-time network activity monitoring, connection tracing, and network access control of any process or command."
 edition = "2021"
 license = "MIT"
-repository = "https://github.com/yourusername/reqtrace"
+repository = "https://github.com/onemadgeek/reqtrace"
 
 [dependencies]
 clap = { version = "4.4", features = ["derive"] }
