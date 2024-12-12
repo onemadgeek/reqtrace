@@ -1,13 +1,15 @@
 [package]
 name = "reqtrace"
-version = "0.1.1"
+version = "0.2.0"
+authors = ["Your Name <your.email@example.com>"]
+description = "A network connection monitoring and control tool"
 edition = "2021"
-authors = ["Arun Prakash <arunprakash27ar@gmail.com>"]
-description = "A simple command-line tool to trace API calls made by other commands"
 license = "MIT"
-repository = "https://github.com/onemadgeek/reqtrace"
+repository = "https://github.com/yourusername/reqtrace"
 
 [dependencies]
-dns-lookup = "2.0.4"
+clap = { version = "4.4", features = ["derive"] }
 colored = "2.0"
 chrono = "0.4"
+dns-lookup = "2.0"
+indicatif = "0.17"

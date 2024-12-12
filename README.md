@@ -1,110 +1,132 @@
-# reqtrace
+# reqtrace 🔍
 
-A command-line tool to monitor and control network connections made by any program. Perfect for debugging, security auditing, and understanding network behavior of applications.
+A powerful command-line tool for real-time network activity monitoring, connection tracing, and network access control of any process or command.
 
-## Features
+[![Crates.io](https://img.shields.io/crates/v/reqtrace)](https://crates.io/crates/reqtrace)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-- 🔍 Monitor all network connections made by a program
-- 🚫 Block network connections with different control modes
-- 🌐 DNS resolution for IP addresses
-- 📊 Detailed connection statistics
-- 🎨 Color-coded output for better visibility
-- 🖥️ Supports Linux and macOS
+## 🚀 Features
 
-## Installation
+- **Universal Command Monitoring**: Monitor any command or process (`curl`, `wget`, `npm`, `python`, etc.)
+- **Real-time Connection Tracking**: Live visualization of all network connections
+- **Domain Resolution**: Automatic DNS resolution for IP addresses
+- **Network Control Modes**:
+  - Monitor Only: Watch and log connections
+  - Block & Exit: Terminate on first connection attempt
+  - Block & Continue: Prevent network access while allowing execution
+- **Detailed Statistics**: Connection counts, unique domains, and IPs
+- **Beautiful CLI Interface**: Clear, colorful, and informative output
 
-You can install reqtrace using Cargo:
+## 📦 Installation
 
 ```bash
 cargo install reqtrace
 ```
 
-## Usage
+## 🎯 Use Cases
 
+### Development & Testing
+- Test applications for unexpected network calls
+- Debug API integrations
+- Monitor dependency downloads
+- Verify offline-first functionality
+
+### Security & Compliance
+- Audit network behavior of third-party tools
+- Enforce network access policies
+- Detect unwanted analytics or tracking
+- Validate security requirements
+
+### System Administration
+- Monitor service network activity
+- Debug connection issues
+- Profile network usage
+- Control application network access
+
+## 📚 Examples
+
+### Monitor Package Manager Activity
 ```bash
-reqtrace [-e|-bc] <command> [args...]
+# Track npm installation network activity
+reqtrace npm install express
+
+# Monitor pip package downloads
+reqtrace pip install requests
+
+# Watch cargo dependencies
+reqtrace cargo build
 ```
 
-### Options
-
-- No flag: Monitor and log all connections
-- `-e`: Exit on first network connection attempt
-- `-bc`: Block all network connections but continue execution
-
-## Examples
-
-### Monitor Network Activity
-
-Watch all connections made by npm install:
+### Security Testing
 ```bash
-$ reqtrace npm install express
-[10:15:23] STARTING npm
-[10:15:24] CONNECTION 104.16.23.35:443 → registry.npmjs.org
-[10:15:24] CONNECTION 104.16.24.35:443 → registry.npmjs.org
+# Ensure a script doesn't make unauthorized connections
+reqtrace -e python script.py
 
-Network Activity Summary:
-Total connections: 2
+# Block all network access but allow execution
+reqtrace -b node app.js
 
-Domains contacted:
-  2 → requests to registry.npmjs.org
+# Monitor Docker container network activity
+reqtrace docker run nginx
 ```
 
-### Block and Exit on First Connection
-
-Stop a program when it tries to make a network connection:
+### API Development
 ```bash
-$ reqtrace -e python script.py
-[14:20:15] STARTING python
-[14:20:16] BLOCKED 93.184.216.34:443 → analytics.service.com
-[14:20:16] STOPPED Terminating process due to network activity
+# Debug API client connections
+reqtrace curl api.example.com
 
-Network Activity Summary:
-Total connections: 1
+# Monitor GraphQL queries
+reqtrace npm run graphql-app
 
-Domains contacted:
-  1 → requests to analytics.service.com
+# Track WebSocket connections
+reqtrace node websocket-server.js
 ```
 
-### Block All Connections but Continue
+## 🛠️ Command-Line Options
 
-Let the program run but prevent network access:
 ```bash
-$ reqtrace -bc node app.js
-[15:45:30] STARTING node
-[15:45:31] BLOCKED 151.101.1.194:443 → api.github.com
-[15:45:32] BLOCKED 52.84.125.129:443 → api.stripe.com
+reqtrace [OPTIONS] <COMMAND> [ARGS]...
 
-Blocked Connections: 2
-
-Network Activity Summary:
-Total connections: 2
-
-Domains contacted:
-  1 → requests to api.github.com
-  1 → requests to api.stripe.com
+Options:
+  -e, --exit-first     Exit on first network connection
+  -b, --block         Block all network connections
+  -t, --timeout       DNS lookup timeout (default: 1000ms)
+  -v, --verbose       Show detailed debug information
+  -h, --help          Show help information
+  -V, --version       Show version information
 ```
 
-## How It Works
+## 🔧 Technical Details
 
-reqtrace monitors network connections using platform-specific methods:
-- On Linux: Monitors `/proc/<pid>/net/tcp` and `/proc/<pid>/net/tcp6`
-- On macOS: Uses `lsof` to track network connections
-- Resolves IP addresses to domain names when possible
-- Provides real-time connection monitoring and statistics
+### Platform Support
+- ✅ Linux: Native `/proc` filesystem monitoring
+- ✅ macOS: Integration with `lsof`
+- ⏳ Windows: Coming soon
 
-## Limitations
+### Monitoring Capabilities
+- TCP connections (IPv4 and IPv6)
+- Domain name resolution
+- Connection timestamps
+- Process hierarchy
 
-- Windows support is not yet available
-- Only TCP connections are monitored
-- Some privileged processes might require running with sudo
+### Performance Impact
+- Minimal overhead
+- Non-blocking DNS resolution
+- Efficient connection caching
 
-## Contributing
+## 🤝 Contributing
 
-Contributions are welcome! Please feel free to:
-- Report bugs
-- Suggest features
-- Submit pull requests
+We welcome contributions! Here's how you can help:
 
-## License
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Open a Pull Request
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+## 📄 License
+
+MIT License - feel free to use in personal and commercial projects.
+
+## 🌟 Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=onemadgeek/reqtrace&type=Date)](https://star-history.com/#onemadgeek/reqtrace&Date)

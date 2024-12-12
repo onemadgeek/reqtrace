@@ -12,6 +12,35 @@ use colored::*;
 use chrono;
 use std::env;
 use std::collections::HashMap;
+use clap::Parser;
+
+#[derive(Parser)]
+#[command(author, version, about = "Monitor and control network connections of processes")]
+struct Cli {
+    /// Command to execute and monitor
+    #[arg(required = true)]
+    command: String,
+
+    /// Command arguments
+    #[arg(trailing_var_arg = true)]
+    args: Vec<String>,
+
+    /// Exit on first network connection attempt
+    #[arg(short = 'e', long = "exit-first")]
+    exit_first: bool,
+
+    /// Block all network connections but continue execution
+    #[arg(short = 'b', long = "block")]
+    block: bool,
+
+    /// DNS lookup timeout in milliseconds
+    #[arg(short = 't', long = "timeout", default_value = "1000")]
+    dns_timeout: u64,
+
+    /// Show verbose output
+    #[arg(short = 'v', long = "verbose")]
+    verbose: bool,
+}
 
 #[derive(PartialEq)]
 enum ExecutionMode {
@@ -107,7 +136,7 @@ fn get_process_connections(_pid: u32) -> Result<HashSet<String>, Box<dyn Error>>
     Ok(HashSet::new())
 }
 
-fn resolve_domain_name(addr: &str, dns_cache: &Arc<Mutex<DnsCache>>) -> (String, Option<String>) {
+fn resolve_domain_name(addr: &str, dns_cache: &Arc<Mutex<DnsCache>>, timeout: u64) -> (String, Option<String>) {
     if let Ok(sock_addr) = addr.to_socket_addrs() {
         if let Some(addr) = sock_addr.into_iter().next() {
             let ip = addr.ip().to_string();
@@ -119,14 +148,20 @@ fn resolve_domain_name(addr: &str, dns_cache: &Arc<Mutex<DnsCache>>) -> (String,
                 }
             }
 
-            // Perform DNS lookup with timeout
-            let dns_result = std::thread::spawn(move || {
-                dns_lookup::lookup_addr(&addr.ip()).ok()
+            // Create channels for communication between threads
+            let (tx, rx) = std::sync::mpsc::channel();
+            let addr_ip = addr.ip();
+
+            // Spawn DNS lookup in a separate thread
+            thread::spawn(move || {
+                let result = dns_lookup::lookup_addr(&addr_ip).ok();
+                let _ = tx.send(result);
             });
 
-            let hostname = match dns_result.join().unwrap() {
-                Some(host) => Some(host),
-                None => None,
+            // Wait for result with timeout
+            let hostname = match rx.recv_timeout(Duration::from_millis(timeout)) {
+                Ok(result) => result,
+                Err(_) => None, // Timeout or channel closed
             };
 
             // Cache the result
@@ -140,16 +175,21 @@ fn resolve_domain_name(addr: &str, dns_cache: &Arc<Mutex<DnsCache>>) -> (String,
     (addr.to_string(), None)
 }
 
-#[derive(Default)]
 struct ConnectionStats {
     total_connections: usize,
     domains: HashMap<String, usize>,
     ips: HashMap<String, usize>,
+    start_time: Instant,
 }
 
 impl ConnectionStats {
     fn new() -> Self {
-        Self::default()
+        Self {
+            total_connections: 0,
+            domains: HashMap::new(),
+            ips: HashMap::new(),
+            start_time: Instant::now(),
+        }
     }
 
     fn add_connection(&mut self, addr: &str, domain: &Option<String>) {
@@ -166,74 +206,100 @@ impl ConnectionStats {
     }
 
     fn print_summary(&self) {
-        eprintln!("\n{}", "Network Activity Summary:".bright_blue().bold());
-        eprintln!("Total connections: {}", self.total_connections.to_string().bright_yellow());
+        // Add a fancy header
+        eprintln!("\n{}", "━".repeat(50).bright_blue());
+        eprintln!("{}",   "           Network Activity Report           ".bold());
+        eprintln!("{}\n", "━".repeat(50).bright_blue());
+
+        // Add timing information
+        eprintln!("🕒 {}", "Monitoring Duration:".bright_blue());
+        eprintln!("   {:.1} seconds\n", self.start_time.elapsed().as_secs_f64());
+
+        // Enhanced connection summary
+        eprintln!("📊 {}", "Connection Summary:".bright_blue());
+        eprintln!("   Total Connections: {}", self.total_connections.to_string().bright_yellow());
+        eprintln!("   Unique IPs: {}", self.ips.len().to_string().bright_yellow());
+        eprintln!("   Unique Domains: {}\n", self.domains.len().to_string().bright_yellow());
 
         if !self.domains.is_empty() {
-            eprintln!("\n{}:", "Domains contacted".bright_blue());
+            eprintln!("🌐 {}:", "Top Domains".bright_blue());
             let mut domains: Vec<_> = self.domains.iter().collect();
             domains.sort_by(|a, b| b.1.cmp(a.1));
-            for (domain, count) in domains {
-                eprintln!("  {} → {} {}", 
+            for (domain, count) in domains.iter().take(5) {
+                let percentage = (**count as f64 / self.total_connections as f64) * 100.0;
+                eprintln!("   {} {:>5.1}% → {}", 
                     count.to_string().bright_yellow(),
-                    "requests to".dimmed(),
+                    percentage,
                     domain.bright_cyan()
                 );
             }
-        }
-
-        if !self.ips.is_empty() {
-            eprintln!("\n{}:", "IP addresses contacted".bright_blue());
-            let mut ips: Vec<_> = self.ips.iter().collect();
-            ips.sort_by(|a, b| b.1.cmp(a.1));
-            for (ip, count) in ips {
-                eprintln!("  {} → {}", 
-                    count.to_string().bright_yellow(),
-                    ip.bright_white()
-                );
+            if domains.len() > 5 {
+                eprintln!("   ... and {} more", domains.len() - 5);
             }
         }
     }
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
-    let args: Vec<String> = env::args().collect();
-    if args.len() < 2 {
-        eprintln!("Usage: reqtrace [-e|-bc] <command> [args...]");
-        eprintln!("Options:");
-        eprintln!("  -e     Exit on first network connection attempt");
-        eprintln!("  -bc    Block all network connections but continue execution");
-        std::process::exit(1);
+struct ActivityMonitor {
+    spinner_states: Vec<&'static str>,
+    current_state: usize,
+    last_update: Instant,
+}
+
+impl ActivityMonitor {
+    fn new() -> Self {
+        Self {
+            spinner_states: vec!["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
+            current_state: 0,
+            last_update: Instant::now(),
+        }
     }
 
-    // Parse arguments to check for flags
-    let mode = if args[1] == "-e" {
+    fn tick(&mut self) -> &str {
+        if self.last_update.elapsed() > Duration::from_millis(80) {
+            self.current_state = (self.current_state + 1) % self.spinner_states.len();
+            self.last_update = Instant::now();
+        }
+        self.spinner_states[self.current_state]
+    }
+}
+
+fn print_startup_banner(command: &str, mode: &ExecutionMode, cli: &Cli) {
+    eprintln!("\n{}", "━".repeat(50).bright_blue());
+    eprintln!("🔍 {} v{}", env!("CARGO_PKG_NAME").bold(), env!("CARGO_PKG_VERSION"));
+    eprintln!("   {}", env!("CARGO_PKG_DESCRIPTION"));
+    eprintln!("{}", "━".repeat(50).bright_blue());
+    
+    eprintln!("\n📋 {}", "Configuration:".bright_blue());
+    eprintln!("   Command: {}", command.bright_yellow());
+    eprintln!("   Mode: {}", match mode {
+        ExecutionMode::Normal => "Monitor Only".bright_green(),
+        ExecutionMode::ExitFirst => "Exit on First Connection".bright_red(),
+        ExecutionMode::BlockAndContinue => "Block Connections".bright_red(),
+    });
+    eprintln!("   DNS Timeout: {} ms", cli.dns_timeout);
+    eprintln!("   Verbose: {}", if cli.verbose { "Yes" } else { "No" });
+    eprintln!("");
+}
+
+fn main() -> Result<(), Box<dyn Error>> {
+    // Parse CLI arguments using Clap
+    let cli = Cli::parse();
+
+    // Convert Clap args to execution mode
+    let mode = if cli.exit_first {
         ExecutionMode::ExitFirst
-    } else if args[1] == "-bc" {
+    } else if cli.block {
         ExecutionMode::BlockAndContinue
     } else {
         ExecutionMode::Normal
     };
 
-    let (command, command_args) = if mode != ExecutionMode::Normal {
-        if args.len() < 3 {
-            eprintln!("Usage: reqtrace [-e|-bc] <command> [args...]");
-            std::process::exit(1);
-        }
-        (&args[2], &args[3..])
-    } else {
-        (&args[1], &args[2..])
-    };
-
-    eprintln!("{} {} {}", 
-        format!("[{}]", chrono::Local::now().format("%H:%M:%S")).dimmed(),
-        "STARTING".bright_blue(),
-        command.bright_yellow()
-    );
+    print_startup_banner(&cli.command, &mode, &cli);
 
     // Start the child process
-    let mut child = Command::new(command)
-        .args(command_args)
+    let mut child = Command::new(&cli.command)
+        .args(&cli.args)
         .stdout(std::process::Stdio::inherit())
         .stderr(std::process::Stdio::inherit())
         .spawn()
@@ -247,23 +313,33 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Give the process a moment to start
     thread::sleep(Duration::from_millis(100));
 
-    // Add this near the start of main, after parsing arguments
+    // Configure DNS cache with timeout from CLI
     let dns_cache = Arc::new(Mutex::new(DnsCache::new(300))); // 5-minute TTL
 
-    // Modify the monitoring loop
+    let mut activity_monitor = ActivityMonitor::new();
+
+    // Monitoring loop
     while let None = child.try_wait()? {
         if let Ok(current_connections) = get_process_connections(pid) {
             for conn in current_connections.difference(&known_connections) {
-                let (addr, maybe_domain) = resolve_domain_name(conn, &dns_cache);
+                let (addr, maybe_domain) = resolve_domain_name(conn, &dns_cache, cli.dns_timeout);
                 let timestamp = chrono::Local::now().format("%H:%M:%S").to_string();
                 
                 // Track statistics
                 stats.add_connection(&addr, &maybe_domain);
                 
+                // Add verbose logging if enabled
+                if cli.verbose {
+                    eprintln!("Debug: New connection detected to {}", addr);
+                }
+
                 match mode {
                     ExecutionMode::Normal => {
-                        eprint!("{} ", format!("[{}]", timestamp).dimmed());
-                        eprint!("{} ", "CONNECTION".bright_green());
+                        eprint!("\r{} {} {} ", 
+                            format!("[{}]", timestamp).dimmed(),
+                            activity_monitor.tick(),
+                            "CONNECTION".bright_green()
+                        );
                     },
                     ExecutionMode::ExitFirst => {
                         eprint!("{} ", format!("[{}]", timestamp).dimmed());
@@ -287,8 +363,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                     },
                     ExecutionMode::BlockAndContinue => {
                         blocked_count += 1;
-                        eprint!("{} ", format!("[{}]", timestamp).dimmed());
-                        eprint!("{} ", "BLOCKED".bright_red());
+                        eprint!("\r{} {} {} ", 
+                            format!("[{}]", timestamp).dimmed(),
+                            activity_monitor.tick(),
+                            "BLOCKED".bright_red()
+                        );
                     }
                 }
                 
@@ -313,7 +392,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     eprintln!("{} {} {}", 
         format!("[{}]", chrono::Local::now().format("%H:%M:%S")).dimmed(),
         "FINISHED".bright_blue(),
-        command.bright_yellow()
+        cli.command.bright_yellow()
     );
 
     // Enhance the ConnectionStats to show blocked connections
