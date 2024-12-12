@@ -1,6 +1,6 @@
 [package]
 name = "reqtrace"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["Arun Prakash <arunprakash27ar@gmail.com>"]
 description = "A simple command-line tool to trace API calls made by other commands"
@@ -8,6 +8,6 @@ license = "MIT"
 repository = "https://github.com/onemadgeek/reqtrace"
 
 [dependencies]
-url = "2.5.0"
-regex = "1.10.3"
-lazy_static = "1.4.0" 
+dns-lookup = "2.0.4"
+colored = "2.0"
+chrono = "0.4"
